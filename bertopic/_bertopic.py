@@ -13,6 +13,7 @@ except (KeyError, AttributeError, TypeError):
 import re
 import math
 import joblib
+import json
 import inspect
 import collections
 import numpy as np
@@ -34,7 +35,7 @@ if sys.version_info >= (3, 8):
     from typing import Literal
 else:
     from typing_extensions import Literal
-from typing import List, Tuple, Union, Mapping, Any, Callable, Iterable
+from typing import List, Tuple, Union, Mapping, Any, Callable, Iterable, Optional, Dict
 
 # Models
 try:
@@ -155,6 +156,7 @@ class BERTopic:
         vectorizer_model: CountVectorizer = None,
         ctfidf_model: TfidfTransformer = None,
         representation_model: BaseRepresentation = None,
+        soup_nuts_dir: Optional[Union[Path, str]] = None,
         verbose: bool = False,
     ):
         """BERTopic initialization.
@@ -224,6 +226,7 @@ class BERTopic:
             representation_model: Pass in a model that fine-tunes the topic representations
                                   calculated through c-TF-IDF. Models from `bertopic.representation`
                                   are supported.
+            soup_nuts_dir: An optional directory that loads an external word count matrix and vocabulary for use in c-TF-IDF.
         """
         # Topic-based parameters
         if top_n_words > 100:
@@ -300,6 +303,7 @@ class BERTopic:
         self.representative_images_ = None
         self.representative_docs_ = {}
         self.topic_aspects_ = {}
+        self.soup_nuts_dir = soup_nuts_dir
 
         # Private attributes for internal tracking purposes
         self._merged_topics = None
@@ -4045,7 +4049,14 @@ class BERTopic:
             logger.info(f"Representation - {action} topics using {method}.")
 
         documents_per_topic = documents.groupby(["Topic"], as_index=False).agg({"Document": " ".join})
-        self.c_tf_idf_, words = self._c_tf_idf(documents_per_topic)
+        # Since we load the tokenized texts directly, we cannot aggregate into class documents yet.
+        if self.soup_nuts_dir is not None:
+            grouped_dict = {topic: sorted(documents.index[documents['Topic'] == topic].tolist()) 
+                            for topic in documents['Topic'].unique()}
+        else:
+            grouped_dict = None
+
+        self.c_tf_idf_, words = self._c_tf_idf(documents_per_topic, grouped_dict)
         self.topic_representations_ = self._extract_words_per_topic(
             words,
             documents,
@@ -4241,6 +4252,7 @@ class BERTopic:
     def _c_tf_idf(
         self,
         documents_per_topic: pd.DataFrame,
+        grouped_dict: Optional[Dict[int, List[int]]],
         fit: bool = True,
         partial_fit: bool = False,
     ) -> Tuple[csr_matrix, List[str]]:
@@ -4257,7 +4269,7 @@ class BERTopic:
             tf_idf: The resulting matrix giving a value (importance score) for each word per topic
             words: The names of the words to which values were given
         """
-        documents = self._preprocess_text(documents_per_topic.Document.values)
+        documents = self._preprocess_text(documents_per_topic.Document.values, grouped_dict)
 
         if partial_fit:
             X = self.vectorizer_model.partial_fit(documents).update_bow(documents)
@@ -4629,18 +4641,36 @@ class BERTopic:
 
         return probabilities
 
-    def _preprocess_text(self, documents: np.ndarray) -> List[str]:
+    def _preprocess_text(
+        self, 
+        documents: np.ndarray, 
+        grouped_dict: Optional[Dict[int, List[int]]],
+    ) -> List[str]:
         r"""Basic preprocessing of text.
 
         Steps:
             * Replace \n and \t with whitespace
             * Only keep alpha-numerical characters
         """
-        cleaned_documents = [doc.replace("\n", " ") for doc in documents]
-        cleaned_documents = [doc.replace("\t", " ") for doc in cleaned_documents]
-        if self.language == "english":
-            cleaned_documents = [re.sub(r"[^A-Za-z0-9 ]+", "", doc) for doc in cleaned_documents]
-        cleaned_documents = [doc if doc != "" else "emptydoc" for doc in cleaned_documents]
+        if self.soup_nuts_dir is None:
+            cleaned_documents = [doc.replace("\n", " ") for doc in documents]
+            cleaned_documents = [doc.replace("\t", " ") for doc in cleaned_documents]
+            if self.language == "english":
+                cleaned_documents = [re.sub(r"[^A-Za-z0-9 ]+", "", doc) for doc in cleaned_documents]
+            cleaned_documents = [doc if doc != "" else "emptydoc" for doc in cleaned_documents]
+        else:
+            # Use `grouped_dict` to combine the tokenized texts
+            print(f"Loading tokenized text from {self.soup_nuts_dir}")
+            cleaned_documents = []
+
+            with open(Path(self.soup_nuts_dir) / "train.metadata.jsonl", "r") as f:
+                tokenized_texts = [json.loads(line)["tokenized_text"] for line in f.readlines()]
+
+            # topic_idx \in [-1, 0, ...]
+            for topic_idx in range(len(grouped_dict)):
+                class_document = " ".join([tokenized_texts[doc_idx] for doc_idx in grouped_dict[topic_idx-1]])
+                cleaned_documents.append(class_document)
+
         return cleaned_documents
 
     @staticmethod
