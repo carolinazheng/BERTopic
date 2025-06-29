@@ -4899,9 +4899,9 @@ def _create_model_from_files(
     """
     params["n_gram_range"] = tuple(params["n_gram_range"])
 
-    if ctfidf_config is not None:
-        ngram_range = ctfidf_config["vectorizer_model"]["params"]["ngram_range"]
-        ctfidf_config["vectorizer_model"]["params"]["ngram_range"] = tuple(ngram_range)
+    # if ctfidf_config is not None:
+    #     ngram_range = ctfidf_config["vectorizer_model"]["params"]["ngram_range"]
+    #     ctfidf_config["vectorizer_model"]["params"]["ngram_range"] = tuple(ngram_range)
 
     params["n_gram_range"] = tuple(params["n_gram_range"])
 
@@ -4965,8 +4965,8 @@ def _create_model_from_files(
         )
 
         # CountVectorizer
-        topic_model.vectorizer_model = CountVectorizer(**ctfidf_config["vectorizer_model"]["params"])
-        topic_model.vectorizer_model.vocabulary_ = ctfidf_config["vectorizer_model"]["vocab"]
+        # topic_model.vectorizer_model = CountVectorizer(**ctfidf_config["vectorizer_model"]["params"])
+        # topic_model.vectorizer_model.vocabulary_ = ctfidf_config["vectorizer_model"]["vocab"]
 
         # ClassTfidfTransformer
         topic_model.ctfidf_model.reduce_frequent_words = ctfidf_config["ctfidf_model"]["reduce_frequent_words"]
